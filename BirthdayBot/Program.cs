@@ -1,0 +1,30 @@
+using BirthdayBot;
+using BirthdayBot.Discord;
+using BirthdayBot.Scheduling;
+using BirthdayBot.Storage;
+using Discord;
+using Discord.Interactions;
+using Discord.WebSocket;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Npgsql;
+
+var builder = Host.CreateApplicationBuilder(args);
+builder.Services.AddSingleton(NpgsqlDataSource.Create(BotConfig.ConnectionString));
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<BirthdayStore>();
+builder.Services.AddSingleton<GuildSettingsStore>();
+builder.Services.AddSingleton<AnnouncementLedger>();
+builder.Services.AddSingleton<Announcer>();
+builder.Services.AddSingleton(new DiscordSocketClient(new DiscordSocketConfig { GatewayIntents = GatewayIntents.Guilds }));
+builder.Services.AddSingleton(sp => new InteractionService(sp.GetRequiredService<DiscordSocketClient>()));
+builder.Services.AddSingleton<InteractionRouter>();
+builder.Services.AddHostedService<BotHostedService>();
+builder.Services.AddHostedService<BirthdayScheduler>();
+
+var host = builder.Build();
+var dataSource = host.Services.GetRequiredService<NpgsqlDataSource>();
+var logger = host.Services.GetRequiredService<ILogger<Program>>();
+await Migrator.ApplyAsync(dataSource, Path.Combine(AppContext.BaseDirectory, "Migrations"), logger, CancellationToken.None);
+await host.RunAsync();

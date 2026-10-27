@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="BirthdayBot/BirthdayBot.csproj" />
+  <Project Path="BirthdayBot/Tests/BirthdayBot.Tests.csproj" />
+</Solution>
