@@ -1,3 +1,4 @@
+using BirthdayBot.Commands;
 using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
@@ -8,6 +9,7 @@ namespace BirthdayBot.Discord;
 public sealed class InteractionRouter(
     DiscordSocketClient client,
     InteractionService interactions,
+    BirthdayForm form,
     IServiceProvider services,
     ILogger<InteractionRouter> logger) {
     public async Task AddModulesAsync() {
@@ -17,17 +19,27 @@ public sealed class InteractionRouter(
     }
 
     private async Task OnInteractionCreatedAsync(SocketInteraction interaction) {
+        if (interaction is SocketModal { Data.CustomId: BirthdayForm.ModalId } modal) {
+            await form.HandleAsync(modal);
+            return;
+        }
         var context = new SocketInteractionContext(client, interaction);
         await interactions.ExecuteCommandAsync(context, services);
     }
 
     private async Task OnInteractionExecutedAsync(ICommandInfo command, IInteractionContext context, IResult result) {
-        if (result.IsSuccess) return;
+        if (result.IsSuccess || context.Interaction is IAutocompleteInteraction) return;
         logger.LogWarning("Interaction {Command} failed with {Error}: {Reason}", command?.Name, result.Error, result.ErrorReason);
+        var body = result.Error switch {
+            InteractionCommandError.UnknownCommand => "That button has expired. Run the command again.",
+            InteractionCommandError.UnmetPrecondition => result.ErrorReason,
+            _ => "That didn't work. Try again in a moment."
+        };
+        var card = Cards.Notice(Cards.Danger, "Something went wrong", body);
         if (context.Interaction.HasResponded) {
-            await context.Interaction.FollowupAsync(result.ErrorReason, ephemeral: true);
+            await context.Interaction.FollowupAsync(components: card, ephemeral: true, allowedMentions: AllowedMentions.None, flags: MessageFlags.ComponentsV2);
             return;
         }
-        await context.Interaction.RespondAsync(result.ErrorReason, ephemeral: true);
+        await Cards.ReplyAsync(context.Interaction, card);
     }
 }

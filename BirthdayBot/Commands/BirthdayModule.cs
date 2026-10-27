@@ -1,3 +1,4 @@
+using BirthdayBot.Discord;
 using BirthdayBot.Storage;
 using BirthdayBot.Time;
 using Discord;
@@ -7,101 +8,93 @@ using Microsoft.Extensions.Logging;
 
 namespace BirthdayBot.Commands;
 
-[Group("birthday", "Set and view birthdays in this server")]
+[Group("birthday", "Save your birthday and see who is celebrating")]
 [CommandContextType(InteractionContextType.Guild)]
 public sealed class BirthdayModule(
     BirthdayStore birthdays,
     GuildSettingsStore settings,
     TimeProvider time,
     ILogger<BirthdayModule> logger) : InteractionModuleBase<SocketInteractionContext> {
-    [SlashCommand("set", "Set your birthday for this server")]
+    [SlashCommand("set", "Save or change your birthday")]
     public async Task SetAsync(
-        [Choice("January", 1)]
-        [Choice("February", 2)]
-        [Choice("March", 3)]
-        [Choice("April", 4)]
-        [Choice("May", 5)]
-        [Choice("June", 6)]
-        [Choice("July", 7)]
-        [Choice("August", 8)]
-        [Choice("September", 9)]
-        [Choice("October", 10)]
-        [Choice("November", 11)]
-        [Choice("December", 12)]
-        int month,
-        [MinValue(1)] [MaxValue(31)] int day,
-        int? year = null) {
+        [Summary("timezone", "Your time zone, so the ping lands at your midnight")]
+        [Autocomplete(typeof(TimeZoneAutocompleteHandler))]
+        string timezone) {
+        if (TimeZoneCatalog.Resolve(timezone) is null) {
+            await Cards.ReplyAsync(Context.Interaction, Cards.Notice(
+                Cards.Danger,
+                "Unknown time zone",
+                $"`{timezone}` isn't a time zone I know. Start typing a city, like `New York` or `Berlin`, and pick one from the list."));
+            return;
+        }
+        await birthdays.SetTimeZoneAsync(Context.Guild.Id, Context.User.Id, timezone, time.GetUtcNow(), CancellationToken.None);
+        logger.LogInformation("User {UserId} set time zone in guild {GuildId}", Context.User.Id, Context.Guild.Id);
         var row = await birthdays.GetAsync(Context.Guild.Id, Context.User.Id, CancellationToken.None);
-        var zone = row is null ? null : TimeZoneCatalog.Resolve(row.TimeZone);
-        if (zone is null) {
-            await RespondAsync("Set your time zone first with /timezone set.", ephemeral: true);
-            return;
-        }
-        var currentYear = TimeZoneInfo.ConvertTime(time.GetUtcNow(), zone).Year;
-        if (!BirthDate.TryCreate(month, day, year, currentYear, out var date, out var error)) {
-            await RespondAsync(error, ephemeral: true);
-            return;
-        }
-        var stored = await birthdays.SetBirthdayAsync(Context.Guild.Id, Context.User.Id, date, time.GetUtcNow(), CancellationToken.None);
-        if (!stored) {
-            await RespondAsync("Set your time zone first with /timezone set.", ephemeral: true);
-            return;
-        }
-        logger.LogInformation("User {UserId} set birthday in guild {GuildId}", Context.User.Id, Context.Guild.Id);
-        var reply = $"Birthday set to {date.Format()}.";
-        var feed = await settings.GetFeedChannelAsync(Context.Guild.Id, CancellationToken.None);
-        if (feed is null) reply += " This server has no birthday feed configured yet.";
-        await RespondAsync(reply, ephemeral: true);
+        await RespondWithModalAsync(BirthdayForm.Build(row?.Birthday));
     }
 
-    [SlashCommand("show", "Show a member's birthday in this server")]
-    public async Task ShowAsync(SocketGuildUser? user = null) {
-        var target = user ?? Context.User;
+    [SlashCommand("view", "See a member's birthday")]
+    public async Task ViewAsync([Summary("member", "Leave empty to see your own")] SocketGuildUser? member = null) {
+        IUser target = member ?? Context.User;
+        var own = target.Id == Context.User.Id;
         var row = await birthdays.GetAsync(Context.Guild.Id, target.Id, CancellationToken.None);
         if (row?.Birthday is not { } birthday) {
-            await RespondAsync("No birthday set.", ephemeral: true);
+            await Cards.ReplyAsync(Context.Interaction, BirthdayCards.NotSaved(target, own));
             return;
         }
-        var reply = birthday.Format();
-        var zone = TimeZoneCatalog.Resolve(row.TimeZone) ?? TimeZoneInfo.Utc;
-        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(time.GetUtcNow(), zone).DateTime);
-        if (birthday.AgeOn(today) is { } age) reply += $" (age {age})";
-        await RespondAsync(reply, ephemeral: true);
+        var feed = await settings.GetFeedChannelAsync(Context.Guild.Id, CancellationToken.None);
+        await Cards.ReplyAsync(Context.Interaction, BirthdayCards.Profile(target, own, row, birthday, time.GetUtcNow(), feed is not null));
+    }
+
+    [SlashCommand("upcoming", "See the next birthdays in this server")]
+    public async Task UpcomingAsync() {
+        var rows = await birthdays.ListGuildAsync(Context.Guild.Id, CancellationToken.None);
+        var now = time.GetUtcNow();
+        var entries = new List<UpcomingEntry>(rows.Count);
+        foreach (var row in rows) {
+            if (row.Birthday is not { } birthday) continue;
+            var zone = TimeZoneCatalog.Resolve(row.TimeZone) ?? TimeZoneInfo.Utc;
+            var today = LocalClock.Today(now, zone);
+            var next = birthday.NextOccurrence(today);
+            entries.Add(new UpcomingEntry(row.UserId, birthday, LocalClock.MidnightUtc(next, zone), birthday.AgeOn(next), next == today));
+        }
+        var upcoming = entries
+            .OrderByDescending(e => e.IsToday)
+            .ThenBy(e => e.At)
+            .ThenBy(e => e.UserId)
+            .Take(10)
+            .ToList();
+        await Cards.ReplyAsync(Context.Interaction, BirthdayCards.Upcoming(upcoming, entries.Count));
     }
 
     [SlashCommand("remove", "Remove your birthday from this server")]
     public async Task RemoveAsync() {
-        var removed = await birthdays.RemoveAsync(Context.Guild.Id, Context.User.Id, CancellationToken.None);
-        await RespondAsync(removed ? "Removed." : "You had no birthday set here.", ephemeral: true);
-    }
-
-    [SlashCommand("upcoming", "Show the next ten birthdays in this server")]
-    public async Task UpcomingAsync() {
-        var rows = await birthdays.ListGuildAsync(Context.Guild.Id, CancellationToken.None);
-        var caller = await birthdays.GetAsync(Context.Guild.Id, Context.User.Id, CancellationToken.None);
-        var zone = caller is null ? TimeZoneInfo.Utc : TimeZoneCatalog.Resolve(caller.TimeZone) ?? TimeZoneInfo.Utc;
-        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(time.GetUtcNow(), zone).DateTime);
-        var upcoming = rows
-            .Where(r => r.Birthday is not null)
-            .Select(r => {
-                var birthday = r.Birthday.GetValueOrDefault();
-                var occurrence = birthday.OccurrenceIn(today.Year);
-                if (occurrence < today) occurrence = birthday.OccurrenceIn(today.Year + 1);
-                return (Row: r, Birthday: birthday, Days: occurrence.DayNumber - today.DayNumber);
-            })
-            .OrderBy(x => x.Days)
-            .ThenBy(x => x.Row.UserId)
-            .Take(10)
-            .ToList();
-        if (upcoming.Count == 0) {
-            await RespondAsync("No birthdays set in this server yet.", ephemeral: true);
+        var row = await birthdays.GetAsync(Context.Guild.Id, Context.User.Id, CancellationToken.None);
+        if (row is null) {
+            await Cards.ReplyAsync(Context.Interaction, BirthdayCards.NotSaved(Context.User, true));
             return;
         }
-        var lines = upcoming.Select(x => {
-            var name = Context.Guild.GetUser(x.Row.UserId)?.DisplayName ?? MentionUtils.MentionUser(x.Row.UserId);
-            var when = x.Days == 0 ? "today" : $"in {x.Days} days";
-            return $"{name} - {(x.Birthday with { Year = null }).Format()} ({when})";
-        });
-        await RespondAsync(string.Join("\n", lines), ephemeral: true);
+        await Cards.ReplyAsync(Context.Interaction, BirthdayCards.ConfirmRemove());
     }
+
+    [ComponentInteraction(BirthdayCards.EditId, true)]
+    public async Task EditAsync() {
+        var row = await birthdays.GetAsync(Context.Guild.Id, Context.User.Id, CancellationToken.None);
+        if (row is null) {
+            await Cards.ReplyAsync(Context.Interaction, Cards.Notice(Cards.Danger, "Pick a time zone first", "Run `/birthday set` and choose your time zone from the list."));
+            return;
+        }
+        await RespondWithModalAsync(BirthdayForm.Build(row.Birthday));
+    }
+
+    [ComponentInteraction(BirthdayCards.RemoveId, true)]
+    public async Task ConfirmRemoveAsync() {
+        await birthdays.RemoveAsync(Context.Guild.Id, Context.User.Id, CancellationToken.None);
+        logger.LogInformation("User {UserId} removed birthday in guild {GuildId}", Context.User.Id, Context.Guild.Id);
+        await Cards.UpdateAsync((SocketMessageComponent)Context.Interaction, BirthdayCards.Removed());
+    }
+
+    [ComponentInteraction(BirthdayCards.CancelId, true)]
+    public async Task CancelRemoveAsync() =>
+        await Cards.UpdateAsync((SocketMessageComponent)Context.Interaction, Cards.Notice(Cards.Neutral, "Nothing changed", "Your birthday is still saved."));
 }

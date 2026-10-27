@@ -1,4 +1,5 @@
 using BirthdayBot;
+using BirthdayBot.Commands;
 using BirthdayBot.Discord;
 using BirthdayBot.Scheduling;
 using BirthdayBot.Storage;
@@ -17,6 +18,7 @@ builder.Services.AddSingleton<BirthdayStore>();
 builder.Services.AddSingleton<GuildSettingsStore>();
 builder.Services.AddSingleton<AnnouncementLedger>();
 builder.Services.AddSingleton<Announcer>();
+builder.Services.AddSingleton<BirthdayForm>();
 builder.Services.AddSingleton(new DiscordSocketClient(new DiscordSocketConfig { GatewayIntents = GatewayIntents.Guilds }));
 builder.Services.AddSingleton(sp => new InteractionService(sp.GetRequiredService<DiscordSocketClient>()));
 builder.Services.AddSingleton<InteractionRouter>();

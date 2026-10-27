@@ -1,6 +1,7 @@
 using BirthdayBot.Storage;
 using Discord;
 using Discord.Interactions;
+using Discord.Net;
 using Discord.WebSocket;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -48,8 +49,13 @@ public sealed class BotHostedService(
         if (_registered) return;
         _registered = true;
         if (BotConfig.GuildId is { } guildId) {
-            var guildCommands = await interactions.RegisterCommandsToGuildAsync(guildId);
-            logger.LogInformation("Registered {Count} commands to guild {GuildId}", guildCommands.Count, guildId);
+            try {
+                var guildCommands = await interactions.RegisterCommandsToGuildAsync(guildId);
+                logger.LogInformation("Registered {Count} commands to guild {GuildId}", guildCommands.Count, guildId);
+            } catch (HttpException ex) when (ex.DiscordCode == DiscordErrorCode.MissingPermissions) {
+                _registered = false;
+                logger.LogError("Cannot register commands to guild {GuildId}: the bot is not in that guild yet. Invite it, and commands register on the next reconnect", guildId);
+            }
             return;
         }
         var globalCommands = await interactions.RegisterCommandsGloballyAsync();

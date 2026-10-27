@@ -34,6 +34,11 @@ public readonly record struct BirthDate(int Month, int Day, int? Year) {
         return new DateOnly(year, Month, Day);
     }
 
+    public DateOnly NextOccurrence(DateOnly today) {
+        var occurrence = OccurrenceIn(today.Year);
+        return occurrence >= today ? occurrence : OccurrenceIn(today.Year + 1);
+    }
+
     public int? AgeOn(DateOnly localDate) => Year is { } year ? localDate.Year - year : null;
 
     public string Format() {

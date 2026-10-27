@@ -4,7 +4,7 @@ public static class TimeZoneCatalog {
     public static IReadOnlyList<string> Ids { get; } = LoadIds();
 
     public static IReadOnlyList<string> Search(string query, int limit = 25) {
-        var trimmed = query.Trim();
+        var trimmed = query.Trim().Replace(' ', '_');
         if (trimmed.Length == 0) {
             return [.. Ids.Take(limit)];
         }
