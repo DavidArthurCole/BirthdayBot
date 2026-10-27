@@ -9,4 +9,9 @@ public static class FeedPermissions {
         if (!permissions.SendMessages) return "Send Messages";
         return null;
     }
+
+    public static bool CanMentionEveryone(SocketGuild guild, SocketGuildChannel channel) =>
+        guild.CurrentUser.GetPermissions(channel).MentionEveryone;
+
+    public static bool CanManage(SocketUser user) => user is SocketGuildUser { GuildPermissions.ManageGuild: true };
 }

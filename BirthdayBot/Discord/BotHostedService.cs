@@ -14,6 +14,7 @@ public sealed class BotHostedService(
     InteractionRouter router,
     BirthdayStore birthdays,
     GuildSettingsStore settings,
+    BirthdayMessageStore messages,
     ILogger<BotHostedService> logger) : IHostedService {
     private bool _registered;
 
@@ -65,6 +66,7 @@ public sealed class BotHostedService(
     private async Task OnLeftGuildAsync(SocketGuild guild) {
         await birthdays.DeleteGuildAsync(guild.Id, CancellationToken.None);
         await settings.DeleteGuildAsync(guild.Id, CancellationToken.None);
+        await messages.DeleteGuildAsync(guild.Id, CancellationToken.None);
         logger.LogInformation("Left guild {GuildId} and deleted its rows", guild.Id);
     }
 }

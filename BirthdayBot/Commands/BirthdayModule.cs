@@ -13,6 +13,7 @@ namespace BirthdayBot.Commands;
 public sealed class BirthdayModule(
     BirthdayStore birthdays,
     GuildSettingsStore settings,
+    BirthdayMessageStore messages,
     TimeProvider time,
     ILogger<BirthdayModule> logger) : InteractionModuleBase<SocketInteractionContext> {
     [SlashCommand("set", "Save or change your birthday")]
@@ -43,7 +44,11 @@ public sealed class BirthdayModule(
             return;
         }
         var feed = await settings.GetFeedChannelAsync(Context.Guild.Id, CancellationToken.None);
-        await Cards.ReplyAsync(Context.Interaction, BirthdayCards.Profile(target, own, row, birthday, time.GetUtcNow(), feed is not null));
+        ProfileAdmin? admin = null;
+        if (!own && FeedPermissions.CanManage(Context.User)) {
+            admin = new ProfileAdmin(await messages.GetAsync(Context.Guild.Id, target.Id, CancellationToken.None));
+        }
+        await Cards.ReplyAsync(Context.Interaction, BirthdayCards.Profile(target, own, row, birthday, time.GetUtcNow(), feed is not null, admin));
     }
 
     [SlashCommand("upcoming", "See the next birthdays in this server")]

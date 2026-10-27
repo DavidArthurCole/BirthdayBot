@@ -19,6 +19,8 @@ builder.Services.AddSingleton<GuildSettingsStore>();
 builder.Services.AddSingleton<AnnouncementLedger>();
 builder.Services.AddSingleton<Announcer>();
 builder.Services.AddSingleton<BirthdayForm>();
+builder.Services.AddSingleton<BirthdayMessageStore>();
+builder.Services.AddSingleton<BirthdayMessageForm>();
 builder.Services.AddSingleton(new DiscordSocketClient(new DiscordSocketConfig { GatewayIntents = GatewayIntents.Guilds }));
 builder.Services.AddSingleton(sp => new InteractionService(sp.GetRequiredService<DiscordSocketClient>()));
 builder.Services.AddSingleton<InteractionRouter>();

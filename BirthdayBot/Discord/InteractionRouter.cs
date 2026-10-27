@@ -10,6 +10,7 @@ public sealed class InteractionRouter(
     DiscordSocketClient client,
     InteractionService interactions,
     BirthdayForm form,
+    BirthdayMessageForm messageForm,
     IServiceProvider services,
     ILogger<InteractionRouter> logger) {
     public async Task AddModulesAsync() {
@@ -21,6 +22,10 @@ public sealed class InteractionRouter(
     private async Task OnInteractionCreatedAsync(SocketInteraction interaction) {
         if (interaction is SocketModal { Data.CustomId: BirthdayForm.ModalId } modal) {
             await form.HandleAsync(modal);
+            return;
+        }
+        if (interaction is SocketModal messageModal && messageModal.Data.CustomId.StartsWith(BirthdayMessageForm.ModalPrefix, StringComparison.Ordinal)) {
+            await messageForm.HandleAsync(messageModal);
             return;
         }
         var context = new SocketInteractionContext(client, interaction);
